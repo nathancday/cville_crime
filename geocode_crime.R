@@ -15,7 +15,7 @@ crime_json <- geojson_read("https://opendata.arcgis.com/datasets/d1877e350fad45d
                            parse = TRUE) # ~ 1-5 minutes...
 
 # extract table of interest
-crime_df <- crime_json[["features"]]
+crime_df2 <- crime_json[["features"]]
 crime_df <-  crime_df[[2]]
 
 # Geocode ----
@@ -72,17 +72,29 @@ coded_df <- inner_join(crime_df, all_latlon)
 retry <- filter(coded_df, is.na(lat))
 # leaving these as is, looks like addresses where incorrected reported in the original data
 
+# Export ----
+# make names match convention, ie CapitalCamel
+coded_df %<>% rename(Address = address, Lon = lon, Lat = lat)
 
 
 # rebuild addresses df to match crime dataset from API
-select(coded_df, address, BlockNumber, StreetName, lon, lat) %>%
+select(coded_df, Address, BlockNumber, StreetName, Lon, Lat) %>%
     unique() %>%
-    write_csv("address_latlon.csv")
+    write_csv("Crime_Data_Geocoded_UniqueAddressesOnly.csv")
 
-test <- read_csv("address_latlon.csv", col_types = "ccccc") # works
+# write out full set too
+write_csv(coded_df, "Crime_Data_Geocoded.csv")
+
+
+# Tests -----
+test <- read_csv("Crime_Data_Geocode_UniqueAddressesOnly.csv", col_types = "ccccc") # works
 
 test2 <- inner_join(crime_df, test)
 
 anti_join(crime_df, test2)
+
+test3 <- read_csv("Crime_Data_Geocoded.csv")
+
+
 
 
