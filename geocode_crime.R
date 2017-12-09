@@ -104,6 +104,7 @@ res2a_parsed <- map_df(res2a, extractor, .id = "query")
 res <- bind_rows(res1a_parsed, res2a_parsed) %>% full_join(address_df, ., by = c("address" = "query"))
 
 saveRDS(res, "addresses_geocoded.RDS")
+write_csv(crime, "addresses_geocode.csv")
 
 geocodeQueryCheck(userType = "free") # useful
 
@@ -112,5 +113,6 @@ geocodeQueryCheck(userType = "free") # useful
 crime <- inner_join(crime_df, res)
 
 saveRDS(crime, "crime_geocoded.RDS")
+write_csv(crime, "crime_geocode.csv")
 
 
