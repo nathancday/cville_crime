@@ -14,7 +14,10 @@ library(lubridate)
 library(magrittr)
 library(tidyverse)
 
+# hackerman 
 theme_set(theme_grey() + theme(legend.position = "top"))
+scale_fill_continuous <- function(...) { viridis::scale_fill_viridis(...) }
+
 
 ### Ins ----------------------------------------------------------------------------
 # get geo-coded crime data from GitHub
@@ -36,8 +39,7 @@ census <- geojson_read("https://opendata.arcgis.com/datasets/e60c072dbb734454a84
 names(census) %<>% tolower()
 census %<>% st_as_sf()
 
-census %<>% select(geometry, starts_with("hu"), pop = population, objectid)
-
+census %<>% select(geometry, starts_with("hu"), white, black, pop = population, objectid, blockgroup)
 
 # project crime onto census CRS
 crime %<>% st_as_sf(coords = c("lon", "lat"), crs = st_crs(census))
@@ -46,68 +48,8 @@ crime %<>% st_as_sf(coords = c("lon", "lat"), crs = st_crs(census))
 crime %<>% mutate(objectid = st_within(crime, census) %>% as.numeric()) # returns NA for those outside
 crime %<>% filter(!is.na(objectid))
 
-table(crime$drug_flag) 
-1436/28552 # 5% of total crime
-
-### Spatial clustering (abondoned) ------------------------------------------
-# spatstat
-library(spatstat)
-
-bbox <- st_bbox(census)
-
-window <- owin(xrange = c(bbox[c(1,3)]),
-               yrange = c(bbox[c(2,4)]))
-
-coords <- st_coordinates(crime) %>% as.tibble()
-
-crime_pp <- ppp(x = coords$X,
-                y = coords$Y,
-                window = window,
-                marks = as.factor(crime$drug_flag)) # factor is key
-
-split(crime_pp) %>% plot()
-
-crime_densities <- density(split(crime_pp))
-plot(crime_densities)
-
-# Calc the drugs density divided by the sum of both
-frac_drug_crime_density <- crime_densities[[1]] / 
-    (crime_densities[[1]] + crime_densities[[2]])
-frac_drug_crime_density
-
-# Plot the density of the fraction of drug crime
-plot(frac_drug_crime_density)
-# ehh
-
-## * bandwidth -----
-library(spatialkernel)
-# Scan from 500m to 1000m in steps of 50m
-bw_choice <- spseg(
-    crime_pp, 
-    h = seq(500, 1000, by = 50),
-    opt = 1)
-
-# Plot the results and highlight the best bandwidth
-plotcv(bw_choice); abline(v = bw_choice$hcv, lty = 2, col = "red")
-
-# Print the best bandwidth
-print(bw_choice$hcv)
-
-
-# Set the correct bandwidth and run for 10 simulations only
-seg10 <- spseg(
-    pts = preston_crime, 
-    h = 800,
-    opt = 3,
-    ntest = 10, 
-    proc = FALSE)
-# Plot the segregation map for violent crime
-plotmc(seg10, "Violent crime")
-
-# Plot seg, the result of running 1000 simulations
-plotmc(seg, "Violent crime")
-
-
+table(crime$drug_flag)
+1436 / (1436 + 28552) # 4.7% of crime
 
 ### Areal stats -------------------------------------------------------------
 
@@ -126,9 +68,6 @@ hist(crime$frac_drugs)
 # merge into census
 census %<>% inner_join(crime)
 
-# hackerman 
-scale_fill_continuous <- function(...) { viridis::scale_fill_viridis(...) }
-
 ggplot(census) +
     geom_sf(aes(fill = frac_drugs))
 
@@ -137,14 +76,14 @@ ggplot(census) +
     geom_sf(aes(fill = pop))
 
 # compare to fraction of housing units vacant
-census %<>% mutate(frac_vacant = hu_vacant / hu_occupied)
+census %<>% mutate(frac_vacant = hu_vacant / (hu_occupied + hu_vacant))
 
 ggplot(census) +
     geom_sf(aes(fill = frac_vacant))
 
 
-# * spatial correlation -----
-library(spdep) # it's an older package sir
+# * auto correlation -----
+library(spdep) # it's an older package sir, but it checks out
 
 census_sp <- as(census, "Spatial") # so we need to revert to Spatial
 block_nb <- poly2nb(census_sp) # build a neighbor network
@@ -152,8 +91,13 @@ block_nb <- poly2nb(census_sp) # build a neighbor network
 plot(census_sp); plot(block_nb, coordinates(census_sp), add = TRUE) # see the network
 
 moran.mc(census_sp$frac_drugs, nb2listw(block_nb), nsim = 999) # sptial correlated
+ggplot(census) + geom_sf(aes(fill = frac_drugs))
+
 moran.mc(census_sp$pop, nb2listw(block_nb), nsim = 999) # not
-moran.mc(census_sp$hu_vacant, nb2listw(block_nb), nsim = 999) # correlated
+ggplot(census) + geom_sf(aes(fill = pop))
+
+moran.mc(census_sp$frac_vacant, nb2listw(block_nb), nsim = 999) # correlated
+ggplot(census) + geom_sf(aes(fill = frac_vacant))
 
 
 # * smr ------
@@ -177,7 +121,10 @@ labels <- st_centroid(census) %>%
 
 ggplot(census) +
     geom_sf(aes(fill = sr_drugs)) +
+    scale_fill_gradient2(midpoint = 1) +
     geom_label(data = labels, aes(x = V1, y = V2, label = objectid))
+
+# * excedence probabilities -----
 
 # For the binomial statistics function
 library(epitools)
@@ -187,20 +134,19 @@ crime_ci <- with(census, binom.exact(drugs, total)) %>%
     as.tibble()
 
 # add relvant data
-crime_ci %<>% mutate(objectid = census$objectid,
-                     sr = proportion / rate)
+crime_ci %<>% mutate(objectid = census$objectid)
 
 # Subset the high SMR data
-crime_high <- filter(crime_ci, sr > 1) %>%
-    arrange(-sr) %>%
+crime_high <- arrange(crime_ci, -proportion) %>%
     mutate(objectid = fct_inorder(as.factor(objectid)))
 
 
 
 # Plot estimates with CIs
-ggplot(crime_high, aes(x = objectid, y = sr,
-                     ymin = lower / rate, ymax = upper / rate,
-                     color = sr)) +
+ggplot(crime_high, aes(x = objectid,
+                       y = proportion / rate, # SR
+                       ymin = lower / rate, ymax = upper / rate,
+                     color = proportion / rate)) +
     geom_pointrange(size = 2) +
     scale_color_viridis()
 
@@ -216,6 +162,112 @@ ggplot(census) +
     scale_fill_viridis(limit = c(.75, NA)) +
     geom_text(data = labels, aes(x = V1, y = V2, label = objectid))
 
+# * glms ------
+
+# loop up variables
+# v15 <- load_variables(2015, "acs5", cache = TRUE)
+# View(v15)
+
+# get median income & age from ACS via library(tidycensus)
+cvl <- get_acs(geography = "block group", county = "Charlottesville", state = "VA",
+               variables = c("B19013_001", "B01002_001") )
+
+decode <- c("income", "age") %>% set_names(c("B19013_001", "B01002_001"))
+cvl$variable %<>% decode[.]
+
+cvl %<>% select(GEOID, variable, estimate) %>%
+    spread(variable, estimate)
+
+ggplot(cvl, aes(age, income)) +
+    geom_point() # missing values
+# let's impute them by neighbors
+
+cvl %<>% rename(blockgroup = GEOID)
+
+census %<>% full_join(cvl)
+
+# sequester the missing values value
+miss <- census %>% filter(is.na(income))
+
+# calculate the mean its neightbors
+miss$income <- st_touches(miss, census) %>% # return the row_ids for adjacent polygons
+    map_dbl(~ census[., ] %>% with(mean(income))) # calculate the means per missing block
+
+# builder decoder
+dc <- miss$income %>% set_names(miss$objectid) 
+    
+# back together again
+census$income %<>% ifelse(is.na(.), dc["19"], .)
+
+# bc drug laws are racist
+census %<>% mutate(frac_black = black / pop)
+
+# pred column positions for ggpairs()
+pred_cols <- match(c("frac_drugs", "frac_vacant", "age", "income", "frac_black"), names(census))
+
+scaled_preds <- census[pred_cols] %>% st_set_geometry(NULL) %>%
+    mutate_at(vars(-frac_drugs), scale) %>%
+    map_dfc(as.numeric)
+
+ggpairs(census, columns = pred_cols)
+ggpairs(scaled_preds)
 
 
+# model
+mod <- glm(drugs ~  frac_black + frac_vacant, data = census,
+           offset = log(not_drugs+drugs), family = "poisson")
+summary(mod)
+resid(mod) %>% hist()
+resid(mod) %>% qqnorm()
+qqline(resid(mod))
+shapiro.test(resid(mod))
+
+census$resid <-  resid(mod)
+census$fitted <- fitted(mod)
+ggplot(census, aes(resid, fitted)) +
+    geom_point()
+
+census$predicted <- exp(1)^predict(mod) # de-link
+ggplot(census, aes(predicted, drugs)) +
+    geom_point() +
+    geom_abline()
+
+ggplot(census) + geom_sf(aes(fill = resid))
+# check if resids are auto-correlated
+mod_sp <- as(census, "Spatial")
+mod_nb <- poly2nb(mod_sp)
+
+moran.mc(census$resid, nb2listw(block_nb), nsim = 999) # its not
+
+# * Bayesian glms ----
+library(R2BayesX)
+bayes_mod <- bayesx(drugs ~ frac_black + frac_vacant,
+                    offset = log(census$not_drugs + census$drugs), 
+                    family = "poisson", data = census)
+
+confint(mod)
+confint(bayes_mod)
+
+# * Now with Spatial random effects
+# special new graph type of neighbor representation
+mod_gra <- nb2gra(block_nb)
+
+sp_re <- sx(i, bs = "spatial", map = mod_gra)
+bayes_mod_sp <- bayesx(drugs ~ frac_black + frac_vacant + sx(objectid, bs = "spatial", map = mod_gra),
+                    offset = log(census$not_drugs + census$drugs), 
+                    family = "poisson", data = census)
+
+summary(bayes_mod_sp)
+
+confint(bayes_mod)
+confint(bayes_mod_sp)
+
+census$spatial <- fitted(bayes_mod_sp)$mu
+ggplot(census) + geom_sf(aes(fill = spatial))
+
+# Map the residuals
+census$spatial_resid <- residuals(bayes_mod_sp)[,2]
+ggplot(census) + geom_sf(aes(fill = spatial_resid))
+
+moran.mc(census$spatial_resid, nb2listw(block_nb), nsim = 999)
 
