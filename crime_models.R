@@ -17,6 +17,8 @@ library(tidyverse)
 # hackerman 
 theme_set(theme_grey() + theme(legend.position = "top"))
 scale_fill_continuous <- function(...) { viridis::scale_fill_viridis(...) }
+geom_sf <- function(data, ...) {geom_sf(data = data, ...) +
+                                  coord_sf(crs = st_crs(data), datum = NA) }
 
 
 ### Ins ----------------------------------------------------------------------------
