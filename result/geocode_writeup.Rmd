@@ -1,0 +1,141 @@
+---
+title: "Geocode"
+author: "Nate Day"
+date: "10/24/2017"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+library(geojsonio)
+library(ggmap)
+library(tidyverse) # always
+library(magrittr) # %<>% life
+```
+
+## Geocoding
+
+"Is the process of converting addresses (like a street address) into geographic coordinates (like latitude and longitude), which you can use to place markers on a map, or position the map." - [Google Maps API Documentation](https://developers.google.com/maps/documentation/geocoding/start)
+
+Unfortunately the Crime Data from the [Charllottesville Open Data Portal](http://opendata.charlottesville.org/) (OPD) doesn't come currated with latitude and longitude coordinates. So it is up to us to geocode it, by accessing the Google Maps API via the great R 📦 [ggmap](https://github.com/dkahle/ggmap).
+
+## Get the data
+
+Using the OPD's API is easy with `library(geojsonio)` and I made a separate [API post here](./api.html), if you want more details. I like to use `geojsonio::geojson_read` to import any data from the ODP. By default the return value will be a `list` object, in the "geoJSON" format. Becasue the crime data has no geometry/shape components, we can parse the original `list` down to just a `tibble`.
+
+```{r api_input, cache=TRUE}
+crime_json <- geojson_read("https://opendata.arcgis.com/datasets/d1877e350fad45d192d233d2b2600156_7.geojson",
+                           parse = TRUE) # ~ 1-5 minutes...for a 2 element list
+
+# parse out table of interest
+crime_df <- crime_json[["features"]]
+crime_df <-  crime_df[["properties"]]
+```
+
+We now have 31,885 crime reports in our hands.
+
+This dataset contains all of the crimes reported in Charlottesville since the fall of 2012, except for homicides. I hope the homicde reports are included in the future, becasue homicides are the worst type of threat in terms of public safety and the public deserves to know.
+
+Since geocoding is based exclusivley on the address of a location, we need to make sure to pay special attention to the quality of information in the `BlockNumber` and `StreetName` columns. Since this dataset it populated directly from reports, there will inevitably be some typos, but we can take a few simple steps to improve our geocoding success.
+
+First lets look at `BlockNumber`. This dataset does not include specific addresses by design, in an effort to balance privacy and public safety, so all values are rounded to the nearest hundred.
+
+```{r block_number}
+# first step always trim white space
+crime_df %<>% mutate_at(vars(BlockNumber, StreetName), funs(trimws(.)))
+
+# convert to numeric for sorting
+crime_df$BlockNumber %<>% as.numeric()
+table(crime_df$BlockNumber, useNA = "always") %>% sort()
+```
+
+From my personal expeirence, I know that addresses for the "0" block, like "0 Avon St", geocode poorly. To combat this I am recoding all reports from a zero hundred block to a one hundred block. This is small shift geographically, and since it often results in a more accurate location we are likely improving subsequent spatial analysis compared to the zero hundred block call, which is usally called somewhere near the middle of the street's length. Also I am recoding the NA values as one hundred block values as well.
+
+```{r}
+crime_df$BlockNumber %<>% ifelse(is.na(.), 100, .) %>% ifelse(. == 0, 100, .)
+table(crime_df$BlockNumber, useNA = "always") # better
+```
+
+Next lets look at the `StreetName` values. Here we can expect a lot more unique values and a lot more typing mistakes.
+
+```{r}
+table(crime_df$StreetName) %>% sort(decreasing = TRUE) # to see the most frequent first
+length(table(crime_df$StreetName)) # 1704
+```
+
+We see the most popular streets for crime reports are "E MARKET ST", "MAIN ST" (both W and E) and "N EMMET ST". This is not suprising since Market St and Main St are the two major East-West roads through downtown, and Emmet St is the major North-South route.
+
+Potential issues start to arrise with the less common street names. We see things like "W MAINS T" and "WEST MAIN", both with 2 occurances, that look like obvious typos, but will likely result in failed or incorrect geocoding results. Since manually adjusting all of these would be tedious work and these mistaken street names represent a small fraction of the total cases, we will leave them, as is, for now. Leaving them as is also will make it easy to merge the geocoded data back in later on.
+
+The final step in our geocode prep is to append the correct "City, State". Since almost every American town has a Main St, we need to be specific that we only care about the Main St in Charlottesville Virginia. So now all that's left to do is `paste` everything together and let Google handle the heavy lifting.
+
+```{r address_build}
+crime_df %<>% mutate(address = paste(BlockNumber, StreetName, "Charlottesville VA"))
+```
+
+## Google Maps API
+
+Google Maps are the best and of course Google offers some really nice APIs to work with them. This makes using Google Maps attractive to companies and because of this Google has established tiered (read \$\$\$) access levels to these utilities. Any individual can submit 2,500 request to the API per day, for free, which is really nice. Beyond that a billing account is required and the nominal fee of \$0.50 per 1,000 requests is charged. That means if we wanted to run a query for every report in the dataset we would have to wait 13 days or pay ~ \$15 dollars. The fifteen dollars doesn't sound too bad, but if we filter down to unique addresses only we can cut our costs drastically.
+
+```{r unique_addresses}
+# check for unique addresses
+address_df <- data.frame(address = unique(crime_df$address))
+nrow(address_df) # 3144
+```
+
+Now we are down to more palatable number of 3,144 unique location, that we can break up into just two days worth of API querying and still keep it free. There is a free alternative to using Google Maps, called the Data Science Toolkit (DSK). The DSK does not impose query limit restrictions, but I think that Google does a better job. You can specify which source to use when running `ggmap::geocode` with the `source` argument, Google is the default and the one I will be using here.
+
+```{r google_query, eval = FALSE}
+address_list <- split(address_df,
+                      rep(c(T,F), length.out = nrow(address_df)))
+
+res1a <- geocode(address_list[[1]]$address, source = "google", output = "all")
+res2a <- geocode(address_list[[2]]$address, source = "google", output = "all")
+```
+
+The argument `output` defaults to "latlon", which will nicely return just the lattitude and longitude coordinates. Since I wanted te be sure the geocoding was behaving itself I opted for the "all" option, which returns a JSON nest list object with a lot more information, including the formatted address actually used by google for each query and the status of the query. The status value is useful to check and see how many address were succesfully coded.
+
+```{r success, eval = FALSE}
+map_lgl(res1a, ~.["status"] == "OK") %>% sum(na.rm = T) # 1550 / 1572
+map_lgl(res2a, ~.["status"] == "OK") %>% sum(na.rm = T) # 1551 / 1572
+```
+
+Because I choose to pull all of this extra data, I need to do a little work extracting it, so I wrote a helper function to parse all of the returned JSON objects. If you want to create your own parser function, practice using `le <- res1a[[1]]` until you have what you want.
+
+```{r helper_fxn}
+extractor <- function(le) {
+    if (length(le) == 2) {
+        if (le$status == "OK") { # so we ignore status: ZERO_RESULTS
+            res <- le$results %>% unlist() %>% bind_rows() %>%
+                select(lat = geometry.location.lat,
+                       lon = geometry.location.lng,
+                       formatted_address,
+                       geometry_loc_type = geometry.location_type)
+        }
+    }
+    else { res <- tibble(formatted_address = NA) } # leave a place holder for misses
+    return(unique(res))
+}
+
+res1a_parsed <- map_df(res1a, extractor, .id = "query")
+res2a_parsed <- map_df(res2a, extractor, .id = "query")
+```
+
+Now that I have all of those long nast JSON objects cleaned up into tidy tibbles, all I need to do it bring the two group back together again and merge with the original `address_df` we used to populate the geocoding queries.
+
+```{r back_together, eval = FALSE}
+res <- bind_rows(res1a_parsed, res2a_parsed) %>% 
+    full_join(address_df, ., by = c("address" = "query")) # on 
+```
+
+This final table with all of the unique address geocodes is available on (my GitHub here)[]. I plan to periodically update this as new versions of the crime data become available, but I will checke here first, so I don't needlessly rerun queries. Eventually this may turn into an offline geocoder for Charlottesville.
+
+Becasue I like making things easy, I also have a full geocoded version of the Crime dataset we downloaded the the ODP available here on my GitHub too. But if you want to make your own just use `inner_join()`.
+
+```{r}
+crime <- inner_join(crime_df, res)
+```
+
+If you notice that my GitHub repository is out of sync with the ODP (ie my repo was last updated prior to the most recent Crime dataset update), you will want to check against the unique address table (perhaps using `anti_join` or `full_join` as a first step instead of `inner_join`) and geocode any new addresses that failed to match. Also feel free to open an issue on my GitHub repo and I will make adjustments for the updated data.
+
+
+
