@@ -1,0 +1,34 @@
+---
+title: "Crime Data Dive"
+author: "Nate Day"
+date: "2/4/2018"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(magrittr)
+library(tidyverse)
+```
+
+## Why drug crime?
+
+- Community impact
+- Cooler than parking tickets
+- Easy access to ~31,000 observations
+
+![](images/the_wire.gif)
+
+## Goals of this talk
+
+- Show the spatial distribution of crime in the city
+- Get someone excited about open data
+- Provide a template for analyzing other CPD data
+![](images/excited.gif)
+
+
+## Where is crime happening?
+![](images/crime_hotspots.png)
+
+
+

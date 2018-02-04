@@ -113,6 +113,8 @@ crime_counts <- crime %>%
     ungroup() %>% # geom_sf() doesn't like groupped dfs
     arrange(n) # so the biggest dots get plotted last
 
+saveRDS(crime_counts, "data/crime_counts.RDS")
+
 library(viridis) # bc it's pretty
 
 ggplot(crime_counts) +
@@ -120,6 +122,15 @@ ggplot(crime_counts) +
     geom_sf(aes(size = n, color = n, alpha = n)) +
     scale_color_viridis() +
     facet_wrap(~drug_flag)
+
+# for presentation
+ggplot(crime_counts) +
+    geom_sf(data = census) +
+    geom_sf(aes(size = n, color = n, alpha = n)) +
+    scale_color_viridis() +
+    facet_wrap(~drug_flag) +
+    theme(axis.text.x = element_blank(), axis.text.y = element_blank(), legend.position = "none")
+
 
 # check the highest addresss for both flags
 arrange(crime_counts, -n) %>% group_by(drug_flag) %>% slice(1:5)

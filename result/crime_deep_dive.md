@@ -18,24 +18,10 @@ Goals of this talk
 - Test if the distribution of drug crime is random
 - Provide a R template for analyzing other CPD data
 
-
-Raw Data --->>> Maps
+Maps for Meaning
 ========================================================
 
-1. Ask Google to GPS map a mailing address.
-2. Repeat a bunch.
-3. Save.
-4. `ggplot(crime_data) + geom_sf()`
-
-
-Maps --->>> Meaning
-========================================================
+- Summarise the data by address
 
 
 
-
-
-```
-Error in crime %<>% mutate(drug_flag = ifelse(grepl("drug", Offense, ignore.case = TRUE),  : 
-  could not find function "%<>%"
-```
