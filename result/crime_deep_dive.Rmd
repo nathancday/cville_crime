@@ -6,7 +6,7 @@ output: ioslides_presentation
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+# knitr::opts_chunk$set(echo = FALSE)
 library(magrittr)
 library(tidyverse)
 library(viridis)
@@ -23,8 +23,8 @@ library(viridis)
 ## Goals of this talk
 
 - Show the spatial distribution of crime in the city
-- Get someone excited about open data
-- Provide a template for analyzing other CPD data
+- Get someone excited about R or open data
+- Provide a tidyverse template for analyzing raw police reports
 
 ![](images/excited.gif)
 
@@ -32,7 +32,7 @@ library(viridis)
 ## Where is crime happening?
 <!-- ![](images/crime_hotspots.png) -->
 
-```{r crime_map, echo = TRUE, tidy = TRUE}
+```{r crime_map, echo=FALSE, cache=TRUE}
 my_github <- "https://github.com/NathanCDay/cville_crime/raw/master/data/"
 crime_counts <- readRDS(gzcon(url(paste0(my_github,"crime_counts_sf.RDS"))))
 census <- readRDS(gzcon(url(paste0(my_github,"census_sf.RDS"))))
@@ -47,7 +47,7 @@ ggplot(crime_counts) +
 
 ## Most frequent addresses
 Top 3 address for drug crime and not drug crime
-```{r most_frequent, echo = TRUE}
+```{r most_frequent, echo = TRUE, cache=TRUE}
 arrange(crime_counts, -n) %>% group_by(drug_flag) %>% slice(1:3)
 ```
 
@@ -57,9 +57,11 @@ The police station's address is 606 E Market Street....
 
 "...when individuals walk in to the police department to file a report the physical address of the department (606 E Market Street) is often used in that initial report if no other known address is available at the time. This is especially true for incidents of found or lost property near the downtown mall where there is no true known incident location. The same is true for any warrant services that result in a police report occurring at the police department." - CPD response
 
+![what_police](images/what_police.gif)
+
 ## Test if the proportions are different:
 
-```{r police_station_proportions, echo = TRUE}
+```{r police_station_proportions, echo = TRUE, cache=TRUE}
 station_props <- arrange(crime_counts, -n) %>%
     group_by(drug_flag) %>%
     add_count(wt = n) %>%
@@ -68,5 +70,26 @@ station_props <- arrange(crime_counts, -n) %>%
 with(station_props, prop.test(n, nn))
 ```
 
+## Aggregate into areas
 
+Census blocks make a lot of sense becuase:
+
+- Tons of data in Census and American Community Surveys
+- Reputable source with code books and APIs
+- Easy to access in R via ODP and `library(tidycensus)`
+
+![do_it](images/do_it.gif)
+
+## Doing it
+```{r census_pop, echo = TRUE, warning=FALSE, message=FALSE, fig.height=4}
+census <- geojsonio::geojson_read("https://opendata.arcgis.com/datasets/e60c072dbb734454a849d21d3814cc5a_14.geojson",
+                                  what = "sp") %>% sf::st_as_sf()
+
+ggplot(census) +
+    geom_sf(aes(fill = Population)) +
+    scale_fill_viridis()
+```
+
+
+## 
 

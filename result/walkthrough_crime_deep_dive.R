@@ -131,9 +131,10 @@ ggplot(crime_counts) +
     facet_wrap(~drug_flag) +
     theme(axis.text.x = element_blank(), axis.text.y = element_blank(), legend.position = "none")
 
+saveRDS(crime_counts, "data/crime_counts_sf.RDS")
 
 # check the highest addresss for both flags
-arrange(crime_counts, -n) %>% group_by(drug_flag) %>% slice(1:5)
+
 
 # check if proportions are equal
 station_props <- arrange(crime_counts, -n) %>%
@@ -142,6 +143,7 @@ station_props <- arrange(crime_counts, -n) %>%
     slice(1)
 
 summarise(station_props, prop_total = n / nn)
+
 
 with(station_props, prop.test(n, nn)) # confirms difference
 
