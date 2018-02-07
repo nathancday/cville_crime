@@ -149,7 +149,7 @@ with(station_props, prop.test(n, nn)) # confirms difference
 
 crime %<>% filter(address != "600 E MARKET ST Charlottesville VA")
 
-#### Spatial Grouping -----------------------------------------------------
+#### Group Summaries -----------------------------------------------------
 
 crime_block <- st_set_geometry(crime, NULL) %>% # need to remove sf geometry property for spread to work
     group_by(within, drug_flag) %>%

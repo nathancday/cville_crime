@@ -9,6 +9,13 @@ purrr
 dplyr
 stringr
 forcats
+broom
 viridisLite
 viridis
+sf
+sp
+Matrix
+spData
+spdep
 bindrcpp
+tidycensus
