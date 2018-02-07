@@ -104,8 +104,8 @@ crime %<>% filter(Offense != "DRUG AWARENESS PRESENTATION")
 # summarise by address
 
 # for the presentation
-saveRDS(census, "data/census_sf.RDS")
-saveRDS(crime, "data/crime_sf.RDS")
+# saveRDS(census, "data/census_sf.RDS")
+# saveRDS(crime, "data/crime_sf.RDS")
 
 crime_counts <- crime %>%
     group_by(address, drug_flag) %>% # geometry column automatically comes with :)
@@ -193,3 +193,52 @@ ggplot(census) +
 moran.mc(census_sp$population, nb2listw(block_nb), nsim = 999) # not
 # because the county land prevents all of the UVA centric blocks from touching are not conne
 
+# GLMs ------
+
+library(tidycensus)
+
+# get age and income variables to join with census
+cvl <- get_acs(geography = "block group", county = "Charlottesville", state = "VA",
+               variables = c("B19013_001", "B01002_001") )
+
+# clean up variabl names
+decode <- c("income", "age") %>% set_names(c("B19013_001", "B01002_001"))
+cvl$variable %<>% decode[.]
+
+# format the data for joining
+cvl %<>% select(GEOID, variable, estimate) %>%
+    spread(variable, estimate)
+
+# viz check
+ggplot(cvl, aes(age, income)) +
+    geom_point() # missing values
+# let's impute them as average of neighbors once joined to census
+
+cvl %<>% rename(blockgroup = GEOID)
+census %<>% full_join(cvl)
+
+# sequester the missing values value
+miss <- census %>% filter(is.na(income))
+
+# calculate the mean its neightbors
+miss$income <- st_touches(miss, census) %>% # return the row_ids for adjacent polygons
+    map_dbl(~ census[., ] %>% with(mean(income))) # calculate the means per missing block
+
+# builder decoder
+dc <- miss$income %>% set_names(miss$objectid) 
+    
+# back together again
+census$income %<>% ifelse(is.na(.), dc[as.character(census$OBJECTID)], .)
+
+# bc drug laws are racist
+census %<>% mutate(frac_black = black / pop)
+
+# pred column positions for ggpairs()
+pred_cols <- match(c("frac_drugs", "frac_vacant", "age", "income", "frac_black"), names(census))
+
+ggpairs(census, columns = pred_cols)
+
+# model
+mod <- glm(frac_drugs ~  frac_black + income, data = census, family = quasibinomial())
+summary(mod)
+resid(mod) %>% hist()
